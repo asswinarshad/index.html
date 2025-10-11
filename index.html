@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live MQTT Tracker Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    <style> body { padding: 0; margin: 0; } html, body, #map { height: 100%; width: 100%; } </style>
+</head>
+<body>
+<div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // --- CONFIGURATION ---
+    // 2. IMPORTANT: Make this topic match your ESP32 code!
+    const mqtt_topic = "lora-tracker/user-ash/location";
+    const broker_address = "broker.hivemq.com";
+    const broker_port = 8084; // WebSocket port for web clients
+
+    // --- MAP INITIALIZATION ---
+    const map = L.map('map').setView([12.09, 75.56], 13); // Default view
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    let userMarker = L.marker([12.09, 75.56]).addTo(map).bindPopup("User Location");
+
+    // --- MQTT CONNECTION ---
+    let clientID = "map-client-" + parseInt(Math.random() * 100);
+    let client = new Paho.MQTT.Client(broker_address, broker_port, clientID);
+
+    client.onConnectionLost = onConnectionLost;
+    client.onMessageArrived = onMessageArrived;
+
+    client.connect({ onSuccess: onConnect });
+
+    function onConnect() {
+      console.log("Connected to MQTT Broker!");
+      // 3. Subscribe to the topic
+      client.subscribe(mqtt_topic);
+    }
+
+    function onConnectionLost(responseObject) {
+      if (responseObject.errorCode !== 0) {
+        console.log("onConnectionLost:" + responseObject.errorMessage);
+        // Optional: try to reconnect
+      }
+    }
+
+    // 4. This function is called when a message arrives
+    function onMessageArrived(message) {
+      console.log("Message Arrived: " + message.payloadString);
+      try {
+        const data = JSON.parse(message.payloadString);
+        if (data.lat && data.lon) {
+          const userPosition = [data.lat, data.lon];
+          userMarker.setLatLng(userPosition); // Move the marker
+          map.panTo(userPosition); // Center the map on the marker
+        }
+      } catch (e) {
+        console.error("Error parsing JSON:", e);
+      }
+    }
+</script>
+</body>
+</html>
