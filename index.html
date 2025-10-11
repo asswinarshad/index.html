@@ -1,63 +1,123 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Live MQTT Tracker Map</title>
+    <title>Live MQTT Tracker Map with Geofencing</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
-    <style> body { padding: 0; margin: 0; } html, body, #map { height: 100%; width: 100%; } </style>
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        html, body, #map { height: 100%; width: 100%; }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255,255,255,0.9);
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 1000;
+        }
+        #controls input {
+            width: 100px;
+            padding: 5px;
+            margin-right: 5px;
+        }
+    </style>
 </head>
 <body>
+
+<div id="controls">
+    <label>Geofence Radius (m):</label>
+    <input type="number" id="radiusInput" placeholder="e.g. 500">
+    <button onclick="setGeofence()">Set</button>
+    <div id="status" style="margin-top:5px;font-weight:bold;"></div>
+</div>
+
 <div id="map"></div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
     // --- CONFIGURATION ---
-    // 2. IMPORTANT: Make this topic match your ESP32 code!
     const mqtt_topic = "lora-tracker/user-ash/location";
     const broker_address = "broker.hivemq.com";
-    const broker_port = 8884; // WebSocket port for web clients
+    const broker_port = 8884;
 
-    // --- MAP INITIALIZATION ---
-    const map = L.map('map').setView([12.09, 75.56], 13); // Default view
+    // --- MAP ---
+    const defaultLat = 12.09;
+    const defaultLon = 75.56;
+    const map = L.map('map').setView([defaultLat, defaultLon], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    let userMarker = L.marker([12.09, 75.56]).addTo(map).bindPopup("User Location");
+
+    let userMarker = L.marker([defaultLat, defaultLon]).addTo(map).bindPopup("User Location");
+
+    // Geofence variables
+    let geofenceCenter = [defaultLat, defaultLon];
+    let geofenceRadius = 0;
+    let geofenceCircle = null;
 
     // --- MQTT CONNECTION ---
-    let clientID = "map-client-" + parseInt(Math.random() * 100);
+    let clientID = "map-client-" + parseInt(Math.random() * 1000);
     let client = new Paho.MQTT.Client(broker_address, broker_port, clientID);
 
     client.onConnectionLost = onConnectionLost;
     client.onMessageArrived = onMessageArrived;
-
     client.connect({onSuccess: onConnect, useSSL: true});
 
     function onConnect() {
-      console.log("Connected to MQTT Broker!");
-      // 3. Subscribe to the topic
-      client.subscribe(mqtt_topic);
+        console.log("✅ Connected to MQTT Broker!");
+        client.subscribe(mqtt_topic);
     }
 
     function onConnectionLost(responseObject) {
-      if (responseObject.errorCode !== 0) {
-        console.log("onConnectionLost:" + responseObject.errorMessage);
-        // Optional: try to reconnect
-      }
+        if (responseObject.errorCode !== 0) {
+            console.log("onConnectionLost:" + responseObject.errorMessage);
+        }
     }
 
-    // 4. This function is called when a message arrives
     function onMessageArrived(message) {
-      console.log("Message Arrived: " + message.payloadString);
-      try {
-        const data = JSON.parse(message.payloadString);
-        if (data.lat && data.lon) {
-          const userPosition = [data.lat, data.lon];
-          userMarker.setLatLng(userPosition); // Move the marker
-          map.panTo(userPosition); // Center the map on the marker
+        console.log("Message Arrived: " + message.payloadString);
+        try {
+            const data = JSON.parse(message.payloadString);
+            if (data.lat && data.lon) {
+                const position = [data.lat, data.lon];
+                userMarker.setLatLng(position);
+                map.panTo(position);
+
+                // Check geofence status
+                if (geofenceRadius > 0) {
+                    const distance = map.distance(position, geofenceCenter);
+                    const statusBox = document.getElementById("status");
+                    if (distance <= geofenceRadius) {
+                        statusBox.innerHTML = "🟢 Inside geofence (" + Math.round(distance) + " m)";
+                        statusBox.style.color = "green";
+                    } else {
+                        statusBox.innerHTML = "🔴 Outside geofence (" + Math.round(distance) + " m)";
+                        statusBox.style.color = "red";
+                    }
+                }
+            }
+        } catch (e) {
+            console.error("Error parsing JSON:", e);
         }
-      } catch (e) {
-        console.error("Error parsing JSON:", e);
-      }
+    }
+
+    // --- SET GEOFENCE ---
+    function setGeofence() {
+        const input = document.getElementById("radiusInput").value;
+        geofenceRadius = parseFloat(input);
+        geofenceCenter = userMarker.getLatLng(); // Use current marker as center
+        if (geofenceCircle) {
+            map.removeLayer(geofenceCircle);
+        }
+        geofenceCircle = L.circle(geofenceCenter, {
+            radius: geofenceRadius,
+            color: "blue",
+            fillColor: "skyblue",
+            fillOpacity: 0.3
+        }).addTo(map);
+        map.setView(geofenceCenter, 15);
+        console.log(`📍 Geofence set at ${geofenceCenter.lat}, ${geofenceCenter.lng} with radius ${geofenceRadius}m`);
     }
 </script>
 </body>
