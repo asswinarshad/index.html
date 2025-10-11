@@ -16,7 +16,7 @@
     // 2. IMPORTANT: Make this topic match your ESP32 code!
     const mqtt_topic = "lora-tracker/user-ash/location";
     const broker_address = "broker.hivemq.com";
-    const broker_port = 8084; // WebSocket port for web clients
+    const broker_port = 8884; // WebSocket port for web clients
 
     // --- MAP INITIALIZATION ---
     const map = L.map('map').setView([12.09, 75.56], 13); // Default view
@@ -30,7 +30,7 @@
     client.onConnectionLost = onConnectionLost;
     client.onMessageArrived = onMessageArrived;
 
-    client.connect({ onSuccess: onConnect });
+    client.connect({onSuccess: onConnect, useSSL: true});
 
     function onConnect() {
       console.log("Connected to MQTT Broker!");
