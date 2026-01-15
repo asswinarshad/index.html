@@ -14,24 +14,32 @@
             top: 10px;
             left: 10px;
             background: rgba(255,255,255,0.9);
-            padding: 10px;
+            padding: 15px;
             border-radius: 8px;
             z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
         }
         #controls input {
-            width: 100px;
+            width: 80px;
             padding: 5px;
             margin-right: 5px;
         }
+        button {
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        .btn-set { background-color: #4CAF50; color: white; border: none; border-radius: 4px; }
+        .btn-reset { background-color: #f44336; color: white; border: none; border-radius: 4px; margin-left: 5px; }
     </style>
 </head>
 <body>
 
 <div id="controls">
-    <label>Geofence Radius (m):</label>
-    <input type="number" id="radiusInput" placeholder="e.g. 500">
-    <button onclick="setGeofence()">Set</button>
-    <div id="status" style="margin-top:5px;font-weight:bold;"></div>
+    <label>Radius (m):</label>
+    <input type="number" id="radiusInput" value="100">
+    <button class="btn-set" onclick="setGeofence()">Update Radius</button>
+    <button class="btn-reset" onclick="resetGeofence()">Reset Center</button>
+    <div id="status" style="margin-top:10px; font-weight:bold;">Status: No Geofence</div>
 </div>
 
 <div id="map"></div>
@@ -43,16 +51,19 @@
     const broker_address = "broker.hivemq.com";
     const broker_port = 8884;
 
-    // --- MAP ---
+    // --- MAP INITIALIZATION ---
     const defaultLat = 12.09589;
     const defaultLon = 75.56313;
-    const map = L.map('map').setView([defaultLat, defaultLon], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const map = L.map('map').setView([defaultLat, defaultLon], 15);
+    
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
 
     let userMarker = L.marker([defaultLat, defaultLon]).addTo(map).bindPopup("User Location");
 
     // Geofence variables
-    let geofenceCenter = [defaultLat, defaultLon];
+    let geofenceCenter = null;
     let geofenceRadius = 0;
     let geofenceCircle = null;
 
@@ -71,55 +82,90 @@
 
     function onConnectionLost(responseObject) {
         if (responseObject.errorCode !== 0) {
-            console.log("onConnectionLost:" + responseObject.errorMessage);
+            console.log("Connection Lost: " + responseObject.errorMessage);
+            document.getElementById("status").innerHTML = "❌ MQTT Disconnected";
         }
     }
 
     function onMessageArrived(message) {
-        console.log("Message Arrived: " + message.payloadString);
+        console.log("New Data:", message.payloadString);
         try {
             const data = JSON.parse(message.payloadString);
             if (data.lat && data.lon) {
                 const position = [data.lat, data.lon];
                 userMarker.setLatLng(position);
-                map.panTo(position);
+                
+                // Optional: Auto-pan map to user
+                // map.panTo(position);
 
-                // Check geofence status
-                if (geofenceRadius > 0) {
-                    const distance = map.distance(position, geofenceCenter);
-                    const statusBox = document.getElementById("status");
-                    if (distance <= geofenceRadius) {
-                        statusBox.innerHTML = "🟢 Inside geofence (" + Math.round(distance) + " m)";
-                        statusBox.style.color = "green";
-                    } else {
-                        statusBox.innerHTML = "🔴 Outside geofence (" + Math.round(distance) + " m)";
-                        statusBox.style.color = "red";
-                    }
-                }
+                // Update Geofence status if active
+                updateStatus(position);
             }
         } catch (e) {
             console.error("Error parsing JSON:", e);
         }
     }
 
-    // --- SET GEOFENCE ---
+    function updateStatus(userPos) {
+        const statusBox = document.getElementById("status");
+        if (geofenceRadius > 0 && geofenceCenter) {
+            const distance = map.distance(userPos, geofenceCenter);
+            if (distance <= geofenceRadius) {
+                statusBox.innerHTML = "🟢 Inside geofence (" + Math.round(distance) + "m)";
+                statusBox.style.color = "green";
+            } else {
+                statusBox.innerHTML = "🔴 Outside geofence (" + Math.round(distance) + "m)";
+                statusBox.style.color = "red";
+            }
+        }
+    }
+
+    // --- GEOFENCE LOGIC ---
+
+    // Function to update radius without changing center
     function setGeofence() {
-        const input = document.getElementById("radiusInput").value;
-        geofenceRadius = parseFloat(input);
-        geofenceCenter = userMarker.getLatLng(); // Use current marker as center
+        const inputVal = document.getElementById("radiusInput").value;
+        const newRadius = parseFloat(inputVal);
+
+        if (isNaN(newRadius) || newRadius <= 0) {
+            alert("Please enter a valid radius in meters.");
+            return;
+        }
+
+        geofenceRadius = newRadius;
+
+        if (geofenceCircle) {
+            // IF ALREADY EXISTS: Just change the radius, keep existing center
+            geofenceCircle.setRadius(geofenceRadius);
+            console.log("Updated radius to: " + geofenceRadius);
+        } else {
+            // IF FIRST TIME: Set center to current user location
+            geofenceCenter = userMarker.getLatLng();
+            geofenceCircle = L.circle(geofenceCenter, {
+                radius: geofenceRadius,
+                color: "blue",
+                fillColor: "skyblue",
+                fillOpacity: 0.3
+            }).addTo(map);
+            console.log("Geofence created at current user location.");
+        }
+        
+        // Refresh status text
+        updateStatus(userMarker.getLatLng());
+    }
+
+    // Function to clear the geofence so it can be re-centered later
+    function resetGeofence() {
         if (geofenceCircle) {
             map.removeLayer(geofenceCircle);
+            geofenceCircle = null;
+            geofenceCenter = null;
+            geofenceRadius = 0;
+            document.getElementById("status").innerHTML = "Status: Geofence Reset";
+            document.getElementById("status").style.color = "black";
+            console.log("Geofence reset.");
         }
-        geofenceCircle = L.circle(geofenceCenter, {
-            radius: geofenceRadius,
-            color: "blue",
-            fillColor: "skyblue",
-            fillOpacity: 0.3
-        }).addTo(map);
-        map.setView(geofenceCenter, 15);
-        console.log(`📍 Geofence set at ${geofenceCenter.lat}, ${geofenceCenter.lng} with radius ${geofenceRadius}m`);
     }
 </script>
 </body>
 </html>
-
