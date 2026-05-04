@@ -128,10 +128,10 @@
         }
     }
 
-    // --- 3. MQTT CONNECTION ---
+   // --- 3. MQTT CONNECTION ---
     const broker_address = "broker.hivemq.com";
-    const broker_port = 8000; // Unencrypted WebSocket port for standard local HTML files
-    const mqttTopic = "lora-tracker/user-ash/location"; // YOUR exact topic
+    const broker_port = 8884; // <-- CHANGED TO SECURE PORT
+    const mqttTopic = "lora-tracker/user-ash/location"; 
     const clientId = "WebMap_" + Math.random().toString(16).substr(2, 8);
 
     const client = new Paho.MQTT.Client(broker_address, broker_port, clientId);
@@ -153,10 +153,10 @@
                 // Move the marker
                 userMarker.setLatLng(position);
                 
-                // Smoothly auto-pan the map to follow the user
+                // Smoothly auto-pan the map
                 map.flyTo(position, map.getZoom(), { animate: true, duration: 0.5 });
 
-                // Update Geofence status if active
+                // Update Geofence status
                 updateStatus(position);
             }
         } catch (e) {
@@ -166,6 +166,7 @@
 
     // Connect to HiveMQ
     client.connect({
+        useSSL: true, // <-- THE MAGIC FIX FOR GITHUB PAGES
         onSuccess: function() {
             console.log("✅ Connected to HiveMQ Broker");
             client.subscribe(mqttTopic);
