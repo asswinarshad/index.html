@@ -1,18 +1,20 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Live MQTT Tracker Map with Geofencing</title>
-    <meta charset="utf-8" />
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Safety Tracker - Live Map</title>
+    
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+    
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        html, body, #map { height: 100%; width: 100%; }
+        body { margin: 0; padding: 0; font-family: Arial, sans-serif; }
+        #map { height: 100vh; width: 100%; }
+        
         #controls {
             position: absolute;
             top: 10px;
-            left: 10px;
+            left: 50px; /* Moved slightly right so it doesn't overlap map zoom buttons */
             background: rgba(255,255,255,0.9);
             padding: 15px;
             border-radius: 8px;
@@ -27,6 +29,7 @@
         button {
             padding: 5px 10px;
             cursor: pointer;
+            font-weight: bold;
         }
         .btn-set { background-color: #4CAF50; color: white; border: none; border-radius: 4px; }
         .btn-reset { background-color: #f44336; color: white; border: none; border-radius: 4px; margin-left: 5px; }
@@ -36,76 +39,38 @@
 
 <div id="controls">
     <label>Radius (m):</label>
-    <input type="number" id="radiusInput" value="100">
+    <input type="number" id="radiusInput" value="50">
     <button class="btn-set" onclick="setGeofence()">Update Radius</button>
     <button class="btn-reset" onclick="resetGeofence()">Reset Center</button>
-    <div id="status" style="margin-top:10px; font-weight:bold;">Status: No Geofence</div>
+    <div id="status" style="margin-top:10px; font-weight:bold;">Status: Waiting for GPS...</div>
 </div>
 
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-    // --- CONFIGURATION ---
-    const mqtt_topic = "lora-tracker/user-ash/location";
-    const broker_address = "broker.hivemq.com";
-    const broker_port = 8884;
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
 
-    // --- MAP INITIALIZATION ---
+<script>
+    // --- 1. MAP INITIALIZATION ---
     const defaultLat = 12.09589;
     const defaultLon = 75.56313;
-    const map = L.map('map').setView([defaultLat, defaultLon], 15);
+    
+    // Zoom set to 18 for a closer, street-level view
+    const map = L.map('map').setView([defaultLat, defaultLon], 18);
     
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    let userMarker = L.marker([defaultLat, defaultLon]).addTo(map).bindPopup("User Location");
+    let userMarker = L.marker([defaultLat, defaultLon]).addTo(map).bindPopup("Wearable Location");
 
     // Geofence variables
     let geofenceCenter = null;
     let geofenceRadius = 0;
     let geofenceCircle = null;
 
-    // --- MQTT CONNECTION ---
-    let clientID = "map-client-" + parseInt(Math.random() * 1000);
-    let client = new Paho.MQTT.Client(broker_address, broker_port, clientID);
-
-    client.onConnectionLost = onConnectionLost;
-    client.onMessageArrived = onMessageArrived;
-    client.connect({onSuccess: onConnect, useSSL: true});
-
-    function onConnect() {
-        console.log("✅ Connected to MQTT Broker!");
-        client.subscribe(mqtt_topic);
-    }
-
-    function onConnectionLost(responseObject) {
-        if (responseObject.errorCode !== 0) {
-            console.log("Connection Lost: " + responseObject.errorMessage);
-            document.getElementById("status").innerHTML = "❌ MQTT Disconnected";
-        }
-    }
-
-    function onMessageArrived(message) {
-        console.log("New Data:", message.payloadString);
-        try {
-            const data = JSON.parse(message.payloadString);
-            if (data.lat && data.lon) {
-                const position = [data.lat, data.lon];
-                userMarker.setLatLng(position);
-                
-                // Optional: Auto-pan map to user
-                // map.panTo(position);
-
-                // Update Geofence status if active
-                updateStatus(position);
-            }
-        } catch (e) {
-            console.error("Error parsing JSON:", e);
-        }
-    }
-
+    // --- 2. GEOFENCE LOGIC (From your GitHub) ---
     function updateStatus(userPos) {
         const statusBox = document.getElementById("status");
         if (geofenceRadius > 0 && geofenceCenter) {
@@ -120,9 +85,6 @@
         }
     }
 
-    // --- GEOFENCE LOGIC ---
-
-    // Function to update radius without changing center
     function setGeofence() {
         const inputVal = document.getElementById("radiusInput").value;
         const newRadius = parseFloat(inputVal);
@@ -154,18 +116,66 @@
         updateStatus(userMarker.getLatLng());
     }
 
-    // Function to clear the geofence so it can be re-centered later
     function resetGeofence() {
         if (geofenceCircle) {
             map.removeLayer(geofenceCircle);
             geofenceCircle = null;
             geofenceCenter = null;
             geofenceRadius = 0;
-            document.getElementById("status").innerHTML = "Status: Geofence Reset";
+            document.getElementById("status").innerHTML = "Status: Geofence Reset (Click Update to set new)";
             document.getElementById("status").style.color = "black";
             console.log("Geofence reset.");
         }
     }
+
+    // --- 3. MQTT CONNECTION ---
+    const broker_address = "broker.hivemq.com";
+    const broker_port = 8000; // Unencrypted WebSocket port for standard local HTML files
+    const mqttTopic = "lora-tracker/user-ash/location"; // YOUR exact topic
+    const clientId = "WebMap_" + Math.random().toString(16).substr(2, 8);
+
+    const client = new Paho.MQTT.Client(broker_address, broker_port, clientId);
+
+    client.onConnectionLost = function(responseObject) {
+        if (responseObject.errorCode !== 0) {
+            console.log("Connection Lost: " + responseObject.errorMessage);
+            document.getElementById("status").innerHTML = "❌ MQTT Disconnected";
+        }
+    };
+
+    client.onMessageArrived = function(message) {
+        console.log("New Data: " + message.payloadString);
+        try {
+            const data = JSON.parse(message.payloadString);
+            if (data.lat && data.lon) {
+                const position = [data.lat, data.lon];
+                
+                // Move the marker
+                userMarker.setLatLng(position);
+                
+                // Smoothly auto-pan the map to follow the user
+                map.flyTo(position, map.getZoom(), { animate: true, duration: 0.5 });
+
+                // Update Geofence status if active
+                updateStatus(position);
+            }
+        } catch (e) {
+            console.error("Error parsing JSON:", e);
+        }
+    };
+
+    // Connect to HiveMQ
+    client.connect({
+        onSuccess: function() {
+            console.log("✅ Connected to HiveMQ Broker");
+            client.subscribe(mqttTopic);
+            document.getElementById("status").innerHTML = "📡 Connected. Waiting for GPS...";
+        },
+        onFailure: function(err) {
+            console.log("Connection failed: " + err.errorMessage);
+            document.getElementById("status").innerHTML = "❌ Broker Connection Failed";
+        }
+    });
 </script>
 </body>
 </html>
